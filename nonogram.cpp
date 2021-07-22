@@ -3,6 +3,7 @@
 #include <map>
 #include <queue>
 #include <set>
+#include <unistd.h>
 
 #include "nonogram.h"
 
@@ -65,6 +66,11 @@ bool Nonogram::solve()
             int i = p.second;
             RowCol other_row_col = row_col == ROW ? COL : ROW;
             Descriptions &desc = row_col == ROW ? row_constraints[i] : col_constraints[i];
+
+            if (isatty(fileno(stdout))) {
+                print_board();
+                printf("\033[%ldA", row_constraints.size());
+            }
 
             Line line = get_line(row_col, i);
             Line new_line = line_solve(line, desc);
