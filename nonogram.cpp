@@ -5,6 +5,7 @@
 #include <set>
 #include <unistd.h>
 
+#include "memoize.h"
 #include "nonogram.h"
 
 Nonogram::Board Nonogram::empty_board(int rows, int cols)
@@ -157,60 +158,84 @@ void Nonogram::set_line(RowCol row_col, int i, const Line &line)
 
 Nonogram::Line Nonogram::line_solve(const Line &line, const Descriptions &desc)
 {
-    Line new_line;
-    Descriptions splits;
+    typedef std::function<bool(int, int)> FixFunction;
+    typedef std::function<Line(int, int)> PaintFunction;
 
-    auto process_splits = [&]() {
-        Line proposed_line;
-        Descriptions s = splits;
+    Line s = line;
+    s.insert(s.begin(), WHITE);
 
-        s[0] -= 1;
-        s[s.size() - 1] -= 1;
-
-        for (unsigned long i = 0; i < desc.size(); ++i) {
-            for (int j = 0; j < s[i]; ++j)
-                proposed_line.push_back(WHITE);
-            for (int j = 0; j < desc[i]; ++j)
-                proposed_line.push_back(BLACK);
-        }
-        for (int i = 0; i < s[s.size() - 1]; ++i)
-            proposed_line.push_back(WHITE);
-
-        for (unsigned long i = 0; i < line.size(); ++i) {
-            if ((line[i] == WHITE && proposed_line[i] == BLACK) ||
-                (line[i] == BLACK && proposed_line[i] == WHITE))
-                return;
-        }
-
-        if (new_line.empty()) {
-            new_line = proposed_line;
-        } else {
-            for (unsigned long i = 0; i < new_line.size(); ++i) {
-                if (new_line[i] != proposed_line[i])
-                    new_line[i] = UNKNOWN;
-            }
-        }
+    auto match_single = [](State s, State d) -> bool {
+        return s == UNKNOWN || s == d;
     };
 
-    std::function<void(int, int)> split_int = [&](int sum, int n) {
-        if (n == 1) {
-            splits.push_back(sum);
-            process_splits();
-            splits.pop_back();
-            return;
-        }
-
-        for (int i = 1; i <= sum - n + 1; ++i) {
-            splits.push_back(i);
-            split_int(sum - i, n - 1);
-            splits.pop_back();
-        }
+    auto merge_c = [](State s, State t) -> State {
+        return s == t ? s : UNKNOWN;
     };
 
-    int sum = 0;
-    for (unsigned long i = 0; i < desc.size(); ++i)
-        sum += desc[i];
-    split_int(line.size() - sum + 2, desc.size() + 1);
+    auto merge = [&](const Line &s, const Line &t) -> Line {
+        Line ret;
+        for (unsigned long i = 0; i < s.size(); ++i)
+            ret.push_back(merge_c(s[i], t[i]));
+        return ret;
+    };
+
+    FixFunction fix, fix_0, fix_1;
+
+    fix = memoize(FixFunction([&](int i, int j) -> bool {
+        return (i == 0) ? (j == 0) : (fix_0(i, j) || fix_1(i, j));
+    }));
+
+    fix_0 = memoize(FixFunction([&](int i, int j) -> bool {
+        return (s[i - 1] == WHITE || s[i - 1] == UNKNOWN) && fix(i - 1, j);
+    }));
+
+    fix_1 = memoize(FixFunction([&](int i, int j) -> bool {
+        int dj = desc[j - 1];
+        if (j < 1 || i < dj + 1 || !match_single(s[i - dj - 1], WHITE))
+            return false;
+        for (int k = i - dj + 1; k <= i; ++k) {
+            if (!match_single(s[k - 1], BLACK))
+                return false;
+        }
+        return fix(i - dj - 1, j - 1);
+    }));
+
+    PaintFunction paint, paint_prime, paint_0, paint_1;
+
+    paint = memoize(PaintFunction([&](int i, int j) -> Line {
+        return i == 0 ? Line() : paint_prime(i, j);
+    }));
+
+    paint_prime = memoize(PaintFunction([&](int i, int j) -> Line {
+        bool f0 = fix_0(i, j);
+        bool f1 = fix_1(i, j);
+        if (f0 && !f1)
+            return paint_0(i, j);
+        if (!f0 && f1)
+            return paint_1(i, j);
+        return merge(paint_0(i, j), paint_1(i, j));
+    }));
+
+    paint_0 = memoize(PaintFunction([&](int i, int j) -> Line {
+        Line ret = paint(i - 1, j);
+        ret.push_back(WHITE);
+        return ret;
+    }));
+
+    paint_1 = memoize(PaintFunction([&](int i, int j) -> Line {
+        int dj = desc[j - 1];
+        Line ret = paint(i - dj - 1, j - 1);
+        ret.push_back(WHITE);
+        for (int k = 0; k < dj; ++k)
+            ret.push_back(BLACK);
+        return ret;
+    }));
+
+    if (!fix(s.size(), desc.size()))
+        return Line();
+    
+    Line new_line = paint(s.size(), desc.size());
+    new_line.erase(new_line.begin());
     return new_line;
 }
 
