@@ -231,6 +231,9 @@ Nonogram::Line Nonogram::line_solve(const Line &line, const Descriptions &desc)
         return ret;
     }));
 
+    if (desc.size() == 0)
+        return Line(s.size(), WHITE);
+
     if (!fix(s.size(), desc.size()))
         return Line();
     
